@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="tl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candy Crush</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .cell{transition:transform .25s ease,opacity .25s ease}
+  .cell.clear{transform:scale(0);opacity:0}
+  .cell.sel{outline:3px solid #fff;transform:scale(1.1)}
+  @keyframes drop{from{transform:translateY(-40px);opacity:.3}to{transform:none;opacity:1}}
+  .cell.new{animation:drop .3s ease}
+  .cell.hint{outline:3px dashed #facc15;animation:pulse 1s infinite}
+  @keyframes comboPop{0%{transform:scale(.5);opacity:0}20%{transform:scale(1.25);opacity:1}80%{transform:scale(1);opacity:1}100%{transform:translateY(-8px);opacity:0}}
+  #combo.show{animation:comboPop 1s ease forwards}
+  .k1{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.65) 0 3px,transparent 3px 8px)}
+  .k2{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.65) 0 3px,transparent 3px 8px)}
+  .k3{box-shadow:inset 0 0 0 3px #facc15,0 0 8px #facc15}
+  .k4{background-image:radial-gradient(circle,#fff 0,#c084fc 70%)}
+</style>
+</head>
+<body class="min-h-screen bg-gradient-to-b from-pink-500 via-purple-600 to-indigo-800 text-white flex flex-col items-center p-4">
+<h1 id="title" class="text-3xl font-extrabold mt-2 select-none">🍬 Candy Crush</h1>
+
+<div id="dev" class="hidden fixed bottom-3 right-3 z-50 w-56 bg-black/80 border border-green-400 rounded-xl p-3 text-sm text-green-300 font-mono">
+  <div class="font-bold mb-2">🛠 DEV CHEATS</div>
+  <div class="grid grid-cols-2 gap-1">
+    <button id="c-moves" class="bg-green-700 text-white rounded px-2 py-1">+10 moves</button>
+    <button id="c-score" class="bg-green-700 text-white rounded px-2 py-1">+500 score</button>
+    <button id="c-hint" class="bg-green-700 text-white rounded px-2 py-1">Hint</button>
+    <button id="c-shuffle" class="bg-green-700 text-white rounded px-2 py-1">Shuffle</button>
+    <button id="c-spec" class="bg-green-700 text-white rounded px-2 py-1 col-span-2">Special candies</button>
+    <button id="c-next" class="bg-green-700 text-white rounded px-2 py-1 col-span-2">Skip level</button>
+    <button id="c-end" class="bg-red-700 text-white rounded px-2 py-1 col-span-2">End game</button>
+  </div>
+  <label class="flex items-center gap-2 mt-2"><input id="c-inf" type="checkbox"> ∞ moves</label>
+  <p class="text-[10px] mt-2 opacity-70">Sine-save pa rin sa leaderboard ang score kahit nag-cheat.</p>
+</div>
+
+<div id="start" class="mt-6 bg-white/15 rounded-2xl p-5 w-full max-w-sm text-center">
+  <p class="mb-3">Ilagay ang pangalan mo:</p>
+  <input id="name" maxlength="20" class="w-full rounded-lg px-3 py-2 text-black" placeholder="Pangalan">
+  <button id="play" class="mt-3 w-full bg-yellow-400 text-black font-bold rounded-lg py-2 hover:bg-yellow-300">Maglaro</button>
+</div>
+
+<div id="game" class="hidden w-full max-w-sm mt-4">
+  <div class="flex justify-between text-lg font-bold mb-1">
+    <span>⭐ <span id="score">0</span></span>
+    <span>🎯 Level <span id="level">1</span></span>
+    <span>👟 <span id="moves">20</span></span>
+  </div>
+  <div id="mission" class="text-center text-sm font-semibold mb-1"></div>
+  <div class="flex items-center gap-2 text-xs mb-1">
+    <div class="flex-1 h-3 bg-black/30 rounded-full overflow-hidden"><div id="bar" class="h-full bg-yellow-400 transition-all duration-300" style="width:0%"></div></div>
+    <span id="goal">0 / 400</span>
+  </div>
+  <div id="combo" class="h-8 text-center text-xl font-extrabold text-yellow-300"></div>
+  <div id="who" class="text-center opacity-70 text-xs mb-1"></div>
+  <p class="text-center text-[11px] opacity-80 mb-1">Match 4 = Striped · L/T = Wrapped · Match 5 = 🌈 Color Bomb</p>
+  <div id="board" class="grid grid-cols-8 gap-1 bg-black/30 p-2 rounded-2xl select-none touch-none"></div>
+  <div id="lvlup" class="hidden mt-3 text-center bg-green-500/30 border border-green-300 rounded-xl p-3">
+    <p id="lvlmsg" class="font-bold text-xl"></p>
+    <p id="lvlbonus" class="text-sm opacity-90"></p>
+    <button id="next" class="mt-2 bg-yellow-400 text-black font-bold rounded-lg px-4 py-2">Susunod na Level ▶</button>
+  </div>
+  <div id="over" class="hidden mt-3 text-center bg-white/15 rounded-xl p-3">
+    <p class="font-bold text-xl">Game Over! Score: <span id="final"></span></p>
+    <button id="again" class="mt-2 bg-yellow-400 text-black font-bold rounded-lg px-4 py-2">Maglaro ulit</button>
+  </div>
+</div>
+
+<div class="w-full max-w-sm mt-5 bg-white/15 rounded-2xl p-4">
+  <h2 class="font-bold mb-2">🏆 Top 10</h2>
+  <ol id="lb" class="space-y-1 text-sm"><li class="opacity-70">Naglo-load...</li></ol>
+</div>
+
+<script type="module">
+import { neon } from 'https://esm.sh/@neondatabase/serverless';
+
+// ⚠️ Ilagay dito ang Neon connection string mo (gumamit ng role na INSERT/SELECT lang sa candy_scores)
+const DATABASE_URL = 'postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require';
+
+let sql = null;
+try { sql = neon(DATABASE_URL, { disableWarningInBrowsers: true }); } catch (e) {}
+
+const N = 8, CANDY = ['🍎','🍇','🍋','🍬','🍓','🫐'], MOVES_PER_LEVEL = 20;
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const rnd = () => Math.floor(Math.random() * types);
+let mission = { type: 'score', goal: 400 }, collected = 0;
+const progress = () => Math.min(mission.type === 'score' ? score - levelStart : collected, mission.goal);
+const missionDone = () => progress() >= mission.goal;
+function setMission() {
+  levelStart = score; collected = 0;
+  if (level % 2 === 0) {
+    mission = { type: 'collect', candy: (level * 2) % types, goal: 10 + level * 2 };
+    moves = MOVES_PER_LEVEL + 5;
+  } else {
+    mission = { type: 'score', goal: 400 + (level - 1) * 150 };
+    moves = MOVES_PER_LEVEL;
+  }
+}
+
+let board = [], sel = null, score = 0, moves = MOVES_PER_LEVEL, busy = false, player = '';
+let fresh = new Set(), clearing = new Set();
+let level = 1, levelStart = 0, types = 5;
+let cheated = false, infinite = false, hint = new Set(), taps = 0, tapT;
+
+// kind: 0 normal, 1 striped (clears row), 2 striped (clears column), 3 wrapped, 4 color bomb
+// cell value = kind*10 + color
+const kind = v => v == null ? 0 : Math.floor(v / 10);
+const colr = v => (v == null || kind(v) === 4) ? -1 : v % 10;
+const at = (d, a, k) => d === 0 ? a*N+k : k*N+a;
+
+function runs(b) {
+  const out = [];
+  for (let d = 0; d < 2; d++) for (let a = 0; a < N; a++) {
+    let s = 0;
+    for (let k = 1; k <= N; k++) {
+      if (k < N && colr(b[at(d,a,k)]) === colr(b[at(d,a,s)])) continue;
+      if (k - s >= 3 && colr(b[at(d,a,s)]) >= 0)
+        out.push({ d, cells: Array.from({ length: k - s }, (_, t) => at(d, a, s + t)) });
+      s = k;
+    }
+  }
+  return out;
+}
+const findMatches = b => new Set(runs(b).flatMap(r => r.cells));
+const isCombo = (va, vb) => va != null && vb != null &&
+  (kind(va) === 4 || kind(vb) === 4 || (kind(va) > 0 && kind(vb) > 0));
+
+function hasMove(b) {
+  for (let i = 0; i < N*N; i++) {
+    const c = i % N;
+    for (const j of [c < N-1 ? i+1 : -1, i+N < N*N ? i+N : -1]) {
+      if (j < 0) continue;
+      const t = b.slice(); [t[i], t[j]] = [t[j], t[i]];
+      if (findMatches(t).size || isCombo(b[i], b[j])) return true;
+    }
+  }
+  return false;
+}
+
+function newBoard() {
+  do {
+    board = Array.from({length: N*N}, rnd);
+    let m;
+    while ((m = findMatches(board)).size) m.forEach(i => board[i] = rnd());
+  } while (!hasMove(board));
+}
+
+function render() {
+  $('board').innerHTML = board.map((v, i) =>
+    `<div data-i="${i}" class="cell aspect-square flex items-center justify-center text-2xl sm:text-3xl bg-white/20 rounded-lg cursor-pointer ${sel===i?'sel':''} ${clearing.has(i)?'clear':''} ${fresh.has(i)?'new':''} ${hint.has(i)?'hint':''} ${v==null?'':'k'+kind(v)}">${v==null?'':(kind(v)===4?'🌈':CANDY[colr(v)])}</div>`
+  ).join('');
+  $('score').textContent = score;
+  $('moves').textContent = infinite ? '∞' : moves;
+  $('level').textContent = level;
+  const got = progress();
+  $('bar').style.width = (got / mission.goal * 100) + '%';
+  $('goal').textContent = got + ' / ' + mission.goal;
+  $('mission').textContent = mission.type === 'score'
+    ? `🎯 Misyon: Umabot ng ${mission.goal} puntos`
+    : `🎯 Misyon: Kolektahin ang ${mission.goal} ${CANDY[mission.candy]}`;
+}
+
+function gravity() {
+  fresh = new Set();
+  for (let c = 0; c < N; c++) {
+    const col = [];
+    for (let r = N-1; r >= 0; r--) if (board[r*N+c] != null) col.push(board[r*N+c]);
+    for (let r = N-1, k = 0; r >= 0; r--, k++) {
+      if (k < col.length) board[r*N+c] = col[k];
+      else { board[r*N+c] = rnd(); fresh.add(r*N+c); }
+    }
+  }
+}
+
+let blasts = [];
+
+function blastArea(i, rad) {
+  const s = new Set(), r0 = Math.floor(i / N), c0 = i % N;
+  for (let r = r0 - rad; r <= r0 + rad; r++) for (let c = c0 - rad; c <= c0 + rad; c++)
+    if (r >= 0 && r < N && c >= 0 && c < N) s.add(r*N+c);
+  return s;
+}
+
+// Pag may special candy sa set na sasabog, sumasabog din ito (chain reaction).
+function expand(set) {
+  const q = [...set], done = new Set();
+  while (q.length) {
+    const i = q.pop();
+    if (done.has(i)) continue;
+    done.add(i);
+    const v = board[i]; if (v == null) continue;
+    const k = kind(v), r = Math.floor(i / N), c = i % N, add = [];
+    if (k === 1) for (let x = 0; x < N; x++) add.push(r*N+x);
+    else if (k === 2) for (let y = 0; y < N; y++) add.push(y*N+c);
+    else if (k === 3) { blasts.push(i); add.push(...blastArea(i, 1)); }
+    else if (k === 4) {
+      const ks = [...new Set(board.map(colr).filter(x => x >= 0))];
+      const t = ks[Math.floor(Math.random() * ks.length)];
+      board.forEach((w, j) => { if (colr(w) === t) add.push(j); });
+    }
+    for (const j of add) if (!set.has(j)) { set.add(j); q.push(j); }
+  }
+  return set;
+}
+
+// Match 4 = striped, L/T/+ = wrapped, match 5 = color bomb
+function planSpecials(rs, swapped) {
+  const sp = new Map();
+  for (const h of rs.filter(r => r.d === 0)) for (const v of rs.filter(r => r.d === 1)) {
+    const x = h.cells.find(i => v.cells.includes(i));
+    if (x != null && kind(board[x]) === 0 && !sp.has(x)) { sp.set(x, 30 + colr(board[x])); h.used = v.used = true; }
+  }
+  for (const r of rs) if (!r.used && r.cells.length >= 4) {
+    const i = r.cells.find(j => swapped.includes(j)) ?? r.cells[Math.floor(r.cells.length / 2)];
+    if (kind(board[i]) !== 0 || sp.has(i)) continue;
+    sp.set(i, r.cells.length >= 5 ? 40 : (r.d === 0 ? 20 : 10) + colr(board[i]));
+  }
+  return sp;
+}
+
+// Special combos: dalawang special candy na pinagpalit (a -> b)
+function comboSet(va, vb, a, b) {
+  if (!isCombo(va, vb)) return null;
+  const ka = kind(va), kb = kind(vb), s = new Set();
+  const r0 = Math.floor(b / N), c0 = b % N;
+  const ofColor = k => board.forEach((v, i) => { if (colr(v) === k) s.add(i); });
+  if (ka === 4 && kb === 4) board.forEach((_, i) => s.add(i));
+  else if (ka === 4 || kb === 4) {
+    const o = ka === 4 ? vb : va, k = colr(o), ko = kind(o);
+    s.add(ka === 4 ? b : a);
+    if (ko === 0 || ko === 3) {
+      ofColor(k);
+      if (ko === 3) {
+        const ks = [...new Set(board.map(colr).filter(x => x >= 0 && x !== k))];
+        if (ks.length) ofColor(ks[Math.floor(Math.random() * ks.length)]);
+      }
+    } else {
+      let t = 0;
+      board.forEach((v, i) => { if (colr(v) === k) { board[i] = (t++ % 2 ? 10 : 20) + k; s.add(i); } });
+    }
+  } else if (ka === 3 && kb === 3) blastArea(b, 2).forEach(i => s.add(i));
+  else if (ka === 3 || kb === 3) {
+    for (let d = -1; d <= 1; d++) for (let x = 0; x < N; x++) {
+      if (r0 + d >= 0 && r0 + d < N) s.add((r0 + d) * N + x);
+      if (c0 + d >= 0 && c0 + d < N) s.add(x * N + c0 + d);
+    }
+  } else {
+    for (let x = 0; x < N; x++) { s.add(r0 * N + x); s.add(x * N + c0); }
+  }
+  s.add(a); s.add(b);
+  return s;
+}
+
+async function settle(preset = null, swapped = []) {
+  let combo = 0; blasts = [];
+  for (;;) {
+    let m, spawns = new Map();
+    if (preset) { m = preset; preset = null; }
+    else {
+      const rs = runs(board);
+      m = new Set(rs.flatMap(r => r.cells));
+      spawns = planSpecials(rs, swapped);
+      spawns.forEach((_, i) => m.delete(i));
+      blasts.forEach(i => blastArea(i, 1).forEach(j => m.add(j)));
+      blasts = [];
+    }
+    swapped = [];
+    if (!m.size) break;
+    expand(m);
+    combo++;
+    if (combo >= 2) showCombo(combo);
+    score += m.size * 10 * combo;
+    clearing = m; render(); await sleep(250);
+    if (mission.type === 'collect') m.forEach(i => { if (colr(board[i]) === mission.candy) collected++; });
+    m.forEach(i => board[i] = null); clearing = new Set();
+    spawns.forEach((val, i) => { if (!m.has(i)) board[i] = val; });
+    gravity(); render(); await sleep(350);
+  }
+  fresh = new Set();
+  if (!hasMove(board)) { newBoard(); }
+  render();
+}
+
+async function trySwap(a, b) {
+  busy = true; sel = null; hint = new Set();
+  const va = board[a], vb = board[b];
+  [board[a], board[b]] = [board[b], board[a]]; render(); await sleep(200);
+  const pre = comboSet(va, vb, a, b);
+  if (!pre && !findMatches(board).size) {
+    [board[a], board[b]] = [board[b], board[a]]; render(); await sleep(200);
+  } else {
+    if (!infinite) moves--;
+    await settle(pre, [a, b]);
+    if (missionDone()) { await levelComplete(); return; }
+    if (moves <= 0) await endGame();
+  }
+  busy = false; render();
+}
+
+function showCombo(n) {
+  const el = $('combo');
+  el.textContent = `🔥 Combo x${n}!`;
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+}
+
+async function levelComplete() {
+  const bonus = infinite ? 0 : moves * 20;
+  score += bonus;
+  $('lvlmsg').textContent = `Level ${level} Complete! 🎉`;
+  $('lvlbonus').textContent = bonus ? `Bonus: +${bonus} (natirang moves)` : '';
+  render();
+  $('lvlup').classList.remove('hidden');
+}
+
+function nextLevel() {
+  level++; types = level < 3 ? 5 : 6; setMission();
+  sel = null; hint = new Set(); busy = false;
+  $('lvlup').classList.add('hidden');
+  newBoard(); render();
+}
+
+async function endGame() {
+  $('final').textContent = score + ' (Level ' + level + ')';
+  $('over').classList.remove('hidden');
+  if (!sql) return;
+  try {
+    await sql`INSERT INTO candy_scores (name, score) VALUES (${player}, ${score})`;
+    loadBoard();
+  } catch (e) { console.error(e); }
+}
+
+async function loadBoard() {
+  const ol = $('lb');
+  if (!sql) { ol.innerHTML = '<li class="opacity-70">Walang database (ilagay ang Neon URL)</li>'; return; }
+  try {
+    try { await sql`CREATE TABLE IF NOT EXISTS candy_scores (id SERIAL PRIMARY KEY, name TEXT NOT NULL, score INT NOT NULL, created_at TIMESTAMPTZ DEFAULT now())`; } catch (e) { /* restricted role: table must already exist */ }
+    const rows = await sql`SELECT name, MAX(score) AS score FROM candy_scores GROUP BY name ORDER BY score DESC LIMIT 10`;
+    ol.innerHTML = rows.length
+      ? rows.map((r, i) => `<li class="flex justify-between"><span>${i+1}. ${esc(r.name)}</span><b>${r.score}</b></li>`).join('')
+      : '<li class="opacity-70">Wala pang score</li>';
+  } catch (e) { ol.innerHTML = '<li class="opacity-70">Hindi maabot ang database</li>'; console.error(e); }
+}
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function startGame() {
+  score = 0; level = 1; types = 5; setMission();
+  sel = null; busy = false;
+  $('lvlup').classList.add('hidden');
+  cheated = false; infinite = false; hint = new Set(); $('c-inf').checked = false;
+  $('over').classList.add('hidden');
+  newBoard(); render();
+}
+
+let down = null;
+
+function tap(i) {
+  if (sel == null) { sel = i; render(); return; }
+  const adj = Math.abs(sel - i) === N || (Math.abs(sel - i) === 1 && Math.floor(sel/N) === Math.floor(i/N));
+  if (sel === i) { sel = null; render(); }
+  else if (adj) trySwap(sel, i);
+  else { sel = i; render(); }
+}
+
+// Swipe: i-drag ang candy papunta sa katabi. Tap: pumili ng dalawang magkatabing candy.
+$('board').addEventListener('pointerdown', e => {
+  if (busy || moves <= 0) return;
+  const el = e.target.closest('[data-i]'); if (!el) return;
+  down = { i: +el.dataset.i, x: e.clientX, y: e.clientY };
+  $('board').setPointerCapture(e.pointerId);
+});
+$('board').addEventListener('pointermove', e => {
+  if (!down || busy) return;
+  const dx = e.clientX - down.x, dy = e.clientY - down.y;
+  if (Math.hypot(dx, dy) < 18) return;
+  const i = down.i, c = i % N; down = null;
+  let j;
+  if (Math.abs(dx) > Math.abs(dy)) j = dx > 0 ? (c < N-1 ? i+1 : -1) : (c > 0 ? i-1 : -1);
+  else j = dy > 0 ? i+N : i-N;
+  if (j < 0 || j >= N*N) return;
+  sel = null; trySwap(i, j);
+});
+$('board').addEventListener('pointerup', () => {
+  if (!down) return;
+  const i = down.i; down = null;
+  if (!busy && moves > 0) tap(i);
+});
+$('board').addEventListener('pointercancel', () => { down = null; });
+
+// ---------- DEV CHEATS ----------
+// Buksan: i-tap ang title ng 5x, o pindutin ang Ctrl+Shift+D, tapos ilagay ang code.
+const DEV_CODE = 'dev123';
+
+function openDev() {
+  const p = $('dev');
+  if (!p.classList.contains('hidden')) { p.classList.add('hidden'); return; }
+  if (prompt('Dev code:') !== DEV_CODE) return;
+  p.classList.remove('hidden');
+}
+
+function findHint() {
+  for (let i = 0; i < N*N; i++) {
+    const c = i % N;
+    for (const j of [c < N-1 ? i+1 : -1, i+N < N*N ? i+N : -1]) {
+      if (j < 0) continue;
+      const t = board.slice(); [t[i], t[j]] = [t[j], t[i]];
+      if (findMatches(t).size || isCombo(board[i], board[j])) return new Set([i, j]);
+    }
+  }
+  return new Set();
+}
+
+const cheat = fn => () => { if (!player) return; cheated = true; fn(); render(); };
+
+$('title').onclick = () => {
+  taps++; clearTimeout(tapT); tapT = setTimeout(() => taps = 0, 1500);
+  if (taps >= 5) { taps = 0; openDev(); }
+};
+addEventListener('keydown', e => {
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyD') { e.preventDefault(); openDev(); }
+});
+$('c-moves').onclick = cheat(() => { moves += 10; $('over').classList.add('hidden'); });
+$('c-score').onclick = cheat(() => { score += 500; });
+$('c-hint').onclick = cheat(() => { if (!busy) hint = findHint(); });
+$('c-shuffle').onclick = cheat(() => { if (!busy) { newBoard(); sel = null; hint = new Set(); } });
+$('c-inf').onchange = e => { if (!player) return; cheated = true; infinite = e.target.checked; render(); };
+$('c-next').onclick = cheat(() => {
+  if (busy || moves <= 0) return;
+  busy = true; levelComplete();
+});
+$('c-spec').onclick = cheat(() => {
+  if (busy) return;
+  [10, 20, 30, 40].forEach(base => {
+    board[Math.floor(Math.random() * N * N)] = base + (base === 40 ? 0 : rnd());
+  });
+});
+$('next').onclick = nextLevel;
+$('c-end').onclick = () => {
+  if (!player || busy || moves <= 0) return;
+  cheated = true; moves = 0; render(); endGame();
+};
+// ---------- END DEV CHEATS ----------
+
+$('play').onclick = () => {
+  player = $('name').value.trim() || 'Player';
+  localStorage.setItem('candyName', player);
+  $('who').textContent = player;
+  $('start').classList.add('hidden'); $('game').classList.remove('hidden');
+  startGame();
+};
+$('again').onclick = startGame;
+$('name').value = localStorage.getItem('candyName') || '';
+loadBoard();
+</script>
+</body>
+</html>
