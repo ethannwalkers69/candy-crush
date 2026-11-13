@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="tl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candy Crush</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .cell{transition:transform .25s ease,opacity .25s ease}
+  .cell.clear{transform:scale(0);opacity:0}
+  .cell.sel{outline:3px solid #fff;transform:scale(1.1)}
+  @keyframes drop{from{transform:translateY(-40px);opacity:.3}to{transform:none;opacity:1}}
+  .cell.new{animation:drop .3s ease}
+  .cell.hint{outline:3px dashed #facc15;animation:pulse 1s infinite}
+</style>
+</head>
+<body class="min-h-screen bg-gradient-to-b from-pink-500 via-purple-600 to-indigo-800 text-white flex flex-col items-center p-4">
+<h1 id="title" class="text-3xl font-extrabold mt-2 select-none">🍬 Candy Crush</h1>
+
+<div id="dev" class="hidden fixed bottom-3 right-3 z-50 w-56 bg-black/80 border border-green-400 rounded-xl p-3 text-sm text-green-300 font-mono">
+  <div class="font-bold mb-2">🛠 DEV CHEATS</div>
+  <div class="grid grid-cols-2 gap-1">
+    <button id="c-moves" class="bg-green-700 text-white rounded px-2 py-1">+10 moves</button>
+    <button id="c-score" class="bg-green-700 text-white rounded px-2 py-1">+500 score</button>
+    <button id="c-hint" class="bg-green-700 text-white rounded px-2 py-1">Hint</button>
+    <button id="c-shuffle" class="bg-green-700 text-white rounded px-2 py-1">Shuffle</button>
+    <button id="c-end" class="bg-red-700 text-white rounded px-2 py-1 col-span-2">End game</button>
+  </div>
+  <label class="flex items-center gap-2 mt-2"><input id="c-inf" type="checkbox"> ∞ moves</label>
+  <p class="text-[10px] mt-2 opacity-70">Sine-save pa rin sa leaderboard ang score kahit nag-cheat.</p>
+</div>
+
+<div id="start" class="mt-6 bg-white/15 rounded-2xl p-5 w-full max-w-sm text-center">
+  <p class="mb-3">Ilagay ang pangalan mo:</p>
+  <input id="name" maxlength="20" class="w-full rounded-lg px-3 py-2 text-black" placeholder="Pangalan">
+  <button id="play" class="mt-3 w-full bg-yellow-400 text-black font-bold rounded-lg py-2 hover:bg-yellow-300">Maglaro</button>
+</div>
+
+<div id="game" class="hidden w-full max-w-sm mt-4">
+  <div class="flex justify-between text-lg font-bold mb-2">
+    <span>⭐ <span id="score">0</span></span>
+    <span id="who" class="opacity-80 text-sm self-center"></span>
+    <span>👟 <span id="moves">25</span></span>
+  </div>
+  <div id="board" class="grid grid-cols-8 gap-1 bg-black/30 p-2 rounded-2xl select-none touch-manipulation"></div>
+  <div id="over" class="hidden mt-3 text-center bg-white/15 rounded-xl p-3">
+    <p class="font-bold text-xl">Game Over! Score: <span id="final"></span></p>
+    <button id="again" class="mt-2 bg-yellow-400 text-black font-bold rounded-lg px-4 py-2">Maglaro ulit</button>
+  </div>
+</div>
+
+<div class="w-full max-w-sm mt-5 bg-white/15 rounded-2xl p-4">
+  <h2 class="font-bold mb-2">🏆 Top 10</h2>
+  <ol id="lb" class="space-y-1 text-sm"><li class="opacity-70">Naglo-load...</li></ol>
+</div>
+
+<script type="module">
+import { neon } from 'https://esm.sh/@neondatabase/serverless';
+
+// ⚠️ Ilagay dito ang Neon connection string mo (gumamit ng role na INSERT/SELECT lang sa candy_scores)
+const DATABASE_URL = 'postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require';
+
+let sql = null;
+try { sql = neon(DATABASE_URL, { disableWarningInBrowsers: true }); } catch (e) {}
+
+const N = 8, CANDY = ['🍎','🍇','🍋','🍬','🍓','🫐'], START_MOVES = 25;
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const rnd = () => Math.floor(Math.random() * CANDY.length);
+
+let board = [], sel = null, score = 0, moves = START_MOVES, busy = false, player = '';
+let fresh = new Set(), clearing = new Set();
+let cheated = false, infinite = false, hint = new Set(), taps = 0, tapT;
+
+function findMatches(b) {
+  const s = new Set();
+  for (let r = 0; r < N; r++) {
+    let run = 1;
+    for (let c = 1; c <= N; c++) {
+      if (c < N && b[r*N+c] != null && b[r*N+c] === b[r*N+c-1]) run++;
+      else { if (run >= 3) for (let k = 1; k <= run; k++) s.add(r*N+c-k); run = 1; }
+    }
+  }
+  for (let c = 0; c < N; c++) {
+    let run = 1;
+    for (let r = 1; r <= N; r++) {
+      if (r < N && b[r*N+c] != null && b[r*N+c] === b[(r-1)*N+c]) run++;
+      else { if (run >= 3) for (let k = 1; k <= run; k++) s.add((r-k)*N+c); run = 1; }
+    }
+  }
+  return s;
+}
+
+function hasMove(b) {
+  for (let i = 0; i < N*N; i++) {
+    const c = i % N;
+    for (const j of [c < N-1 ? i+1 : -1, i+N < N*N ? i+N : -1]) {
+      if (j < 0) continue;
+      const t = b.slice(); [t[i], t[j]] = [t[j], t[i]];
+      if (findMatches(t).size) return true;
+    }
+  }
+  return false;
+}
+
+function newBoard() {
+  do {
+    board = Array.from({length: N*N}, rnd);
+    let m;
+    while ((m = findMatches(board)).size) m.forEach(i => board[i] = rnd());
+  } while (!hasMove(board));
+}
+
+function render() {
+  $('board').innerHTML = board.map((v, i) =>
+    `<div data-i="${i}" class="cell aspect-square flex items-center justify-center text-2xl sm:text-3xl bg-white/20 rounded-lg cursor-pointer ${sel===i?'sel':''} ${clearing.has(i)?'clear':''} ${fresh.has(i)?'new':''} ${hint.has(i)?'hint':''}">${v==null?'':CANDY[v]}</div>`
+  ).join('');
+  $('score').textContent = score;
+  $('moves').textContent = infinite ? '∞' : moves;
+}
+
+function gravity() {
+  fresh = new Set();
+  for (let c = 0; c < N; c++) {
+    const col = [];
+    for (let r = N-1; r >= 0; r--) if (board[r*N+c] != null) col.push(board[r*N+c]);
+    for (let r = N-1, k = 0; r >= 0; r--, k++) {
+      if (k < col.length) board[r*N+c] = col[k];
+      else { board[r*N+c] = rnd(); fresh.add(r*N+c); }
+    }
+  }
+}
+
+async function settle() {
+  let combo = 0, m;
+  while ((m = findMatches(board)).size) {
+    combo++;
+    score += m.size * 10 * combo;
+    clearing = m; render(); await sleep(250);
+    m.forEach(i => board[i] = null); clearing = new Set();
+    gravity(); render(); await sleep(350);
+  }
+  fresh = new Set();
+  if (!hasMove(board)) { newBoard(); }
+  render();
+}
+
+async function trySwap(a, b) {
+  busy = true; sel = null; hint = new Set();
+  [board[a], board[b]] = [board[b], board[a]]; render(); await sleep(200);
+  if (!findMatches(board).size) {
+    [board[a], board[b]] = [board[b], board[a]]; render(); await sleep(200);
+  } else {
+    if (!infinite) moves--;
+    await settle();
+    if (moves <= 0) await endGame();
+  }
+  busy = false; render();
+}
+
+async function endGame() {
+  $('final').textContent = score;
+  $('over').classList.remove('hidden');
+  if (!sql) return;
+  try {
+    await sql`INSERT INTO candy_scores (name, score) VALUES (${player}, ${score})`;
+    loadBoard();
+  } catch (e) { console.error(e); }
+}
+
+async function loadBoard() {
+  const ol = $('lb');
+  if (!sql) { ol.innerHTML = '<li class="opacity-70">Walang database (ilagay ang Neon URL)</li>'; return; }
+  try {
+    try { await sql`CREATE TABLE IF NOT EXISTS candy_scores (id SERIAL PRIMARY KEY, name TEXT NOT NULL, score INT NOT NULL, created_at TIMESTAMPTZ DEFAULT now())`; } catch (e) { /* restricted role: table must already exist */ }
+    const rows = await sql`SELECT name, MAX(score) AS score FROM candy_scores GROUP BY name ORDER BY score DESC LIMIT 10`;
+    ol.innerHTML = rows.length
+      ? rows.map((r, i) => `<li class="flex justify-between"><span>${i+1}. ${esc(r.name)}</span><b>${r.score}</b></li>`).join('')
+      : '<li class="opacity-70">Wala pang score</li>';
+  } catch (e) { ol.innerHTML = '<li class="opacity-70">Hindi maabot ang database</li>'; console.error(e); }
+}
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function startGame() {
+  score = 0; moves = START_MOVES; sel = null; busy = false;
+  cheated = false; infinite = false; hint = new Set(); $('c-inf').checked = false;
+  $('over').classList.add('hidden');
+  newBoard(); render();
+}
+
+$('board').addEventListener('click', e => {
+  if (busy || moves <= 0) return;
+  const el = e.target.closest('[data-i]'); if (!el) return;
+  const i = +el.dataset.i;
+  if (sel == null) { sel = i; render(); return; }
+  const adj = Math.abs(sel - i) === N || (Math.abs(sel - i) === 1 && Math.floor(sel/N) === Math.floor(i/N));
+  if (sel === i) { sel = null; render(); }
+  else if (adj) trySwap(sel, i);
+  else { sel = i; render(); }
+});
+
+// ---------- DEV CHEATS ----------
+// Buksan: i-tap ang title ng 5x, o pindutin ang Ctrl+Shift+D, tapos ilagay ang code.
+const DEV_CODE = 'dev123';
+
+function openDev() {
+  const p = $('dev');
+  if (!p.classList.contains('hidden')) { p.classList.add('hidden'); return; }
+  if (prompt('Dev code:') !== DEV_CODE) return;
+  p.classList.remove('hidden');
+}
+
+function findHint() {
+  for (let i = 0; i < N*N; i++) {
+    const c = i % N;
+    for (const j of [c < N-1 ? i+1 : -1, i+N < N*N ? i+N : -1]) {
+      if (j < 0) continue;
+      const t = board.slice(); [t[i], t[j]] = [t[j], t[i]];
+      if (findMatches(t).size) return new Set([i, j]);
+    }
+  }
+  return new Set();
+}
+
+const cheat = fn => () => { if (!player) return; cheated = true; fn(); render(); };
+
+$('title').onclick = () => {
+  taps++; clearTimeout(tapT); tapT = setTimeout(() => taps = 0, 1500);
+  if (taps >= 5) { taps = 0; openDev(); }
+};
+addEventListener('keydown', e => {
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyD') { e.preventDefault(); openDev(); }
+});
+$('c-moves').onclick = cheat(() => { moves += 10; $('over').classList.add('hidden'); });
+$('c-score').onclick = cheat(() => { score += 500; });
+$('c-hint').onclick = cheat(() => { if (!busy) hint = findHint(); });
+$('c-shuffle').onclick = cheat(() => { if (!busy) { newBoard(); sel = null; hint = new Set(); } });
+$('c-inf').onchange = e => { if (!player) return; cheated = true; infinite = e.target.checked; render(); };
+$('c-end').onclick = () => {
+  if (!player || busy || moves <= 0) return;
+  cheated = true; moves = 0; render(); endGame();
+};
+// ---------- END DEV CHEATS ----------
+
+$('play').onclick = () => {
+  player = $('name').value.trim() || 'Player';
+  localStorage.setItem('candyName', player);
+  $('who').textContent = player;
+  $('start').classList.add('hidden'); $('game').classList.remove('hidden');
+  startGame();
+};
+$('again').onclick = startGame;
+$('name').value = localStorage.getItem('candyName') || '';
+loadBoard();
+</script>
+</body>
+</html>
