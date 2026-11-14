@@ -90,7 +90,7 @@
 import { neon } from 'https://esm.sh/@neondatabase/serverless';
 
 // BABALA: Ilagay dito ang Neon connection string mo (gumamit ng role na INSERT/SELECT lang sa candy_scores)
-const DATABASE_URL = 'postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require';
+const DATABASE_URL = 'postgresql://neondb_owner:npg_t5ka1NdrmpQH@ep-muddy-art-bdlnfhci-pooler.c-8.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
 let sql = null;
 try { sql = neon(DATABASE_URL, { disableWarningInBrowsers: true }); } catch (e) {}
